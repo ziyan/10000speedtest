@@ -19,6 +19,7 @@ func run(ctx context.Context, command *cli.Command) error {
 		DownloadSize: command.Int("download-size"),
 		UploadSize:   command.Int("upload-size"),
 		Insecure:     command.Bool("insecure"),
+		Chart:        command.Bool("chart"),
 	}
 	mode := command.String("mode")
 

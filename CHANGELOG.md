@@ -4,6 +4,12 @@ All notable changes to 10000speedtest will be documented in this file.
 
 The format is based loosely on Keep a Changelog, and versions are recorded using repository tags.
 
+## [0.2.0]
+
+### Added
+
+- Live colored bar chart of throughput over time, drawn per stage (separate charts for download and upload). Bars are shaded red → yellow → green by height and the vertical axis auto-scales to the running peak. Enabled with `--chart` (default on); it automatically falls back to single-line output when stdout is not a terminal, and honors `NO_COLOR`.
+
 ## [0.1.0]
 
 ### Added

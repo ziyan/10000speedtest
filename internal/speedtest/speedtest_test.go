@@ -5,11 +5,21 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/ziyan/10000speedtest/internal/logging"
 )
+
+// TestMain quiets the package logger so worker debug messages do not clutter
+// test output.
+func TestMain(runner *testing.M) {
+	logging.Setup("error")
+	os.Exit(runner.Run())
+}
 
 func testConfig(server string) Config {
 	return Config{

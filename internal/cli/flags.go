@@ -42,6 +42,11 @@ var flags = []cli.Flag{
 		Value: true,
 		Usage: "skip TLS certificate verification (the test port serves a non-matching cert)",
 	},
+	&cli.BoolFlag{
+		Name:  "chart",
+		Value: true,
+		Usage: "draw a live colored bar chart (falls back to a single line when output is not a terminal)",
+	},
 	&cli.StringFlag{
 		Name:  "log-level",
 		Value: "info",

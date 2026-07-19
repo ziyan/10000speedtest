@@ -44,6 +44,7 @@ type Config struct {
 	DownloadSize int
 	UploadSize   int
 	Insecure     bool
+	Chart        bool
 }
 
 // Tester runs download and upload stages against a configured server.
@@ -105,19 +106,22 @@ func (self *Tester) runStage(name string, worker func(context.Context, *atomic.I
 		}()
 	}
 
+	render := newRenderer(name, self.config.Chart)
 	reporterDone := make(chan struct{})
 	reporterExited := make(chan struct{})
-	go liveReporter(name, counter, start, reporterDone, reporterExited)
+	go liveReporter(counter, start, reporterDone, reporterExited, render)
 
 	waitGroup.Wait()
 	// Stop the reporter and wait for it to finish printing so its last progress
-	// line cannot land after the summary line below and corrupt the output.
+	// frame cannot land after the summary line below and corrupt the output.
 	close(reporterDone)
 	<-reporterExited
 
 	elapsed := time.Since(start).Seconds()
 	totalBytes := counter.Load()
 	megabitsPerSecond := float64(totalBytes) * 8 / elapsed / 1e6
+	// A leading \r + trailing pad overwrites the single live line in line mode;
+	// in chart mode the cursor is already on a fresh line below the chart.
 	fmt.Printf("\r%-10s %8.2f Mbps   (%s in %.1fs)%s\n",
 		name+":", megabitsPerSecond, humanBytes(totalBytes), elapsed, "          ")
 	if totalBytes == 0 {
@@ -125,12 +129,13 @@ func (self *Tester) runStage(name string, worker func(context.Context, *atomic.I
 	}
 }
 
-// liveReporter prints the instantaneous throughput roughly twice a second. It
-// closes exited when it returns so runStage can wait for it to stop printing.
-func liveReporter(name string, counter *atomic.Int64, start time.Time, done, exited chan struct{}) {
+// liveReporter samples the instantaneous throughput a few times a second and
+// feeds each sample to the renderer. It closes exited when it returns so
+// runStage can wait for it to stop drawing.
+func liveReporter(counter *atomic.Int64, start time.Time, done, exited chan struct{}, render renderer) {
 	defer deferutil.Recover()
 	defer close(exited)
-	ticker := time.NewTicker(500 * time.Millisecond)
+	ticker := time.NewTicker(reportInterval)
 	defer ticker.Stop()
 
 	previousBytes := int64(0)
@@ -146,7 +151,7 @@ func liveReporter(name string, counter *atomic.Int64, start time.Time, done, exi
 				continue
 			}
 			megabitsPerSecond := float64(currentBytes-previousBytes) * 8 / interval / 1e6
-			fmt.Printf("\r%-10s %8.2f Mbps   ", name+":", megabitsPerSecond)
+			render.sample(megabitsPerSecond)
 			previousBytes = currentBytes
 			previousTime = now
 		}

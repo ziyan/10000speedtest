@@ -51,13 +51,27 @@ make build
 10000speedtest --server https://gz.10000gd.tech:12348
 ```
 
-Example output:
+On a terminal, each stage draws a live, colored bar chart of throughput over
+time (bars shaded red → yellow → green by height), then prints the average:
 
 ```
-Server:      https://gz.10000gd.tech:12348
-Connections: 12
-Duration:    10s per stage
+Download     590.87 Mbps   peak 853.02 Mbps
+   853 │               ▂     ▃█
+   746 │ ▃▁▇  ▃ ▃▂ ▅▃ ▁█  ▁  ██
+   640 │ ███ ▅█ ██▅██▄██▁ █▂▄██▄
+   533 │▂███▅██▃█████████▂██████
+   427 │████████████████████████
+   320 │████████████████████████
+   213 │████████████████████████
+   107 │████████████████████████
+     0 └────────────────────────
+Download:    635.04 Mbps   (455.55 MiB in 6.0s)
+```
 
+Pass `--chart=false` (or pipe the output to a file) for plain single-line
+progress instead:
+
+```
 Download:    671.64 Mbps   (640.83 MiB in 10.0s)
 Upload:       65.30 Mbps   (62.28 MiB in 10.0s)
 ```
@@ -73,7 +87,10 @@ Upload:       65.30 Mbps   (62.28 MiB in 10.0s)
 | `--download-size` | `20`                             | MiB requested per download connection              |
 | `--upload-size`   | `20`                             | MiB posted per upload connection                   |
 | `--insecure`      | `true`                           | skip TLS certificate verification                  |
+| `--chart`         | `true`                           | live colored bar chart (auto-off when not a TTY)   |
 | `--log-level`     | `info`                           | log level (`debug`, `info`, `notice`, …)           |
+
+Set `NO_COLOR` in the environment to draw the chart without ANSI colors.
 
 ## License
 
