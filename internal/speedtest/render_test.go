@@ -5,18 +5,29 @@ import (
 	"testing"
 )
 
-// TestChartRendererFrameShape draws a single frame (no cursor-up prefix) and
-// checks it has the expected shape: a header, chartHeight bar rows, and an axis.
+// primeWarmUp feeds the chart the leading warmup samples it discards, so a test
+// can then exercise the real charting path.
+func primeWarmUp(chart *chartRenderer) {
+	for index := 0; index < warmUpSamples; index++ {
+		chart.sample(1)
+	}
+}
+
+// TestChartRendererFrameShape draws a single real frame (no cursor-up prefix)
+// and checks it has the expected shape: header, chartHeight bar rows, and axis.
 func TestChartRendererFrameShape(t *testing.T) {
 	builder := &strings.Builder{}
 	chart := &chartRenderer{name: "Download", useColor: false, output: builder}
 
-	// One sample => one frame with no leading cursor-up escape.
+	primeWarmUp(chart)
+	builder.Reset()
+
+	// First post-warmup sample => one frame with no leading cursor-up escape.
 	chart.sample(500)
 	frame := builder.String()
 
-	if strings.HasPrefix(frame, "\033[8A") || strings.Contains(frame, "A\r") {
-		t.Fatal("first frame must not move the cursor up")
+	if strings.HasPrefix(frame, "\033[") {
+		t.Fatal("first drawn frame must not move the cursor up")
 	}
 	if !strings.Contains(frame, "Download") {
 		t.Fatal("expected the stage name in the chart header")
@@ -30,7 +41,6 @@ func TestChartRendererFrameShape(t *testing.T) {
 	if !strings.ContainsRune(frame, '└') {
 		t.Fatal("expected a bottom axis corner in the chart")
 	}
-	// Header + chartHeight bar rows + axis line = chartHeight+2 newline-ended lines.
 	if lines := strings.Count(frame, "\n"); lines != chartHeight+2 {
 		t.Fatalf("expected %d lines in the frame, got %d", chartHeight+2, lines)
 	}
@@ -42,6 +52,9 @@ func TestChartRendererRedrawMovesCursor(t *testing.T) {
 	builder := &strings.Builder{}
 	chart := &chartRenderer{name: "Download", useColor: false, output: builder}
 
+	primeWarmUp(chart)
+	builder.Reset()
+
 	chart.sample(100)
 	firstLength := builder.Len()
 	chart.sample(200)
@@ -52,12 +65,48 @@ func TestChartRendererRedrawMovesCursor(t *testing.T) {
 	}
 }
 
+// TestChartRendererDiscardsWarmUp verifies the first second of samples is
+// dropped from both the bars and the scale.
+func TestChartRendererDiscardsWarmUp(t *testing.T) {
+	builder := &strings.Builder{}
+	chart := &chartRenderer{name: "Download", useColor: false, output: builder}
+
+	// A large warmup spike that must not become a bar or set the scale.
+	for index := 0; index < warmUpSamples; index++ {
+		chart.sample(9999)
+	}
+	if len(chart.samples) != 0 {
+		t.Fatalf("expected warmup samples to be discarded, got %d retained", len(chart.samples))
+	}
+	if chart.drawn {
+		t.Fatal("chart should not draw a frame during warmup")
+	}
+	if !strings.Contains(builder.String(), "warming up") {
+		t.Fatal("expected a warming-up placeholder during warmup")
+	}
+
+	chart.sample(100)
+	if len(chart.samples) != 1 {
+		t.Fatalf("expected 1 charted sample after warmup, got %d", len(chart.samples))
+	}
+	if !chart.drawn {
+		t.Fatal("chart should draw after the first post-warmup sample")
+	}
+}
+
 // TestChartRendererColor verifies color escapes appear only when enabled.
 func TestChartRendererColor(t *testing.T) {
 	colored := &strings.Builder{}
 	plain := &strings.Builder{}
-	(&chartRenderer{name: "Upload", useColor: true, output: colored}).sample(300)
-	(&chartRenderer{name: "Upload", useColor: false, output: plain}).sample(300)
+	coloredChart := &chartRenderer{name: "Upload", useColor: true, output: colored}
+	plainChart := &chartRenderer{name: "Upload", useColor: false, output: plain}
+
+	primeWarmUp(coloredChart)
+	primeWarmUp(plainChart)
+	colored.Reset()
+	plain.Reset()
+	coloredChart.sample(300)
+	plainChart.sample(300)
 
 	if !strings.Contains(colored.String(), "\033[38;2;") {
 		t.Fatal("expected a 24-bit color escape when color is enabled")

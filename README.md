@@ -52,7 +52,9 @@ make build
 ```
 
 On a terminal, each stage draws a live, colored bar chart of throughput over
-time (bars shaded red → yellow → green by height), then prints the average:
+time (bars shaded red → yellow → green by height), then prints the average. The
+first second of each stage — the connection-ramp warmup — is left out of the
+chart so the opening spike does not compress the steady state:
 
 ```
 Download     590.87 Mbps   peak 853.02 Mbps

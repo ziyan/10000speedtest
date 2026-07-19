@@ -11,6 +11,14 @@ import (
 // reportInterval is how often the live throughput is sampled and drawn.
 const reportInterval = 250 * time.Millisecond
 
+// chartWarmUp is how much of the start of a stage the chart ignores, so the
+// initial connection-ramp spike does not dominate the vertical scale. The
+// summary average still covers the whole run.
+const chartWarmUp = time.Second
+
+// warmUpSamples is the number of leading samples the chart discards.
+const warmUpSamples = int(chartWarmUp / reportInterval)
+
 const (
 	chartHeight = 8  // number of bar rows
 	chartWidth  = 50 // maximum number of bars kept on screen
@@ -44,16 +52,25 @@ func (self *lineRenderer) sample(megabitsPerSecond float64) {
 }
 
 // chartRenderer draws a scrolling colored bar chart in place, one bar per
-// sample, auto-scaling the vertical axis to the peak seen so far.
+// sample, auto-scaling the vertical axis to the peak seen so far. The first
+// chartWarmUp of samples are discarded so the connection-ramp spike does not
+// compress the rest of the chart.
 type chartRenderer struct {
 	name     string
 	useColor bool
 	output   io.Writer
+	received int
 	samples  []float64
 	drawn    bool
 }
 
 func (self *chartRenderer) sample(megabitsPerSecond float64) {
+	self.received++
+	if self.received <= warmUpSamples {
+		// Show a placeholder on the line the chart header will later overwrite.
+		_, _ = fmt.Fprintf(self.output, "\r\033[K%-10s warming up…", self.name)
+		return
+	}
 	self.samples = append(self.samples, megabitsPerSecond)
 	if len(self.samples) > chartWidth {
 		self.samples = self.samples[len(self.samples)-chartWidth:]
