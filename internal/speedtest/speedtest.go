@@ -75,20 +75,20 @@ func New(config Config) *Tester {
 	return &Tester{config: config, client: &http.Client{Transport: transport}}
 }
 
-// Download runs the download stage and returns the measured throughput in Mbps.
-func (self *Tester) Download() float64 {
-	return self.runStage("Download", self.downloadWorker)
+// Download runs the download stage, printing a live Mbps readout.
+func (self *Tester) Download() {
+	self.runStage("Download", self.downloadWorker)
 }
 
-// Upload runs the upload stage and returns the measured throughput in Mbps.
-func (self *Tester) Upload() float64 {
-	return self.runStage("Upload", self.uploadWorker)
+// Upload runs the upload stage, printing a live Mbps readout.
+func (self *Tester) Upload() {
+	self.runStage("Upload", self.uploadWorker)
 }
 
 // runStage launches Config.Connections worker goroutines that share an atomic
-// byte counter, runs them for Config.Duration, prints a live readout, and
-// returns the average throughput in Mbps.
-func (self *Tester) runStage(name string, worker func(context.Context, *atomic.Int64)) float64 {
+// byte counter, runs them for Config.Duration, and prints a live readout
+// followed by the average throughput in Mbps.
+func (self *Tester) runStage(name string, worker func(context.Context, *atomic.Int64)) {
 	ctx, cancel := context.WithTimeout(context.Background(), self.config.Duration)
 	defer cancel()
 
@@ -106,22 +106,30 @@ func (self *Tester) runStage(name string, worker func(context.Context, *atomic.I
 	}
 
 	reporterDone := make(chan struct{})
-	go liveReporter(name, counter, start, reporterDone)
+	reporterExited := make(chan struct{})
+	go liveReporter(name, counter, start, reporterDone, reporterExited)
 
 	waitGroup.Wait()
+	// Stop the reporter and wait for it to finish printing so its last progress
+	// line cannot land after the summary line below and corrupt the output.
 	close(reporterDone)
+	<-reporterExited
 
 	elapsed := time.Since(start).Seconds()
 	totalBytes := counter.Load()
 	megabitsPerSecond := float64(totalBytes) * 8 / elapsed / 1e6
 	fmt.Printf("\r%-10s %8.2f Mbps   (%s in %.1fs)%s\n",
 		name+":", megabitsPerSecond, humanBytes(totalBytes), elapsed, "          ")
-	return megabitsPerSecond
+	if totalBytes == 0 {
+		log.Warningf("%s stage transferred no data; check --server and connectivity (use --log-level debug for details)", name)
+	}
 }
 
-// liveReporter prints the instantaneous throughput roughly twice a second.
-func liveReporter(name string, counter *atomic.Int64, start time.Time, done chan struct{}) {
+// liveReporter prints the instantaneous throughput roughly twice a second. It
+// closes exited when it returns so runStage can wait for it to stop printing.
+func liveReporter(name string, counter *atomic.Int64, start time.Time, done, exited chan struct{}) {
 	defer deferutil.Recover()
+	defer close(exited)
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -161,6 +169,13 @@ func (self *Tester) downloadWorker(ctx context.Context, counter *atomic.Int64) {
 			log.Debugf("download request failed: %v", err)
 			continue
 		}
+		if response.StatusCode != http.StatusOK {
+			// An error page is not payload; skip it so its body is not counted
+			// as download throughput.
+			log.Debugf("download returned unexpected status %s", response.Status)
+			_ = response.Body.Close()
+			continue
+		}
 		if _, err := io.CopyBuffer(writer, response.Body, buffer); err != nil {
 			log.Debugf("download read failed: %v", err)
 		}
@@ -191,6 +206,9 @@ func (self *Tester) uploadWorker(ctx context.Context, counter *atomic.Int64) {
 			log.Debugf("upload request failed: %v", err)
 			continue
 		}
+		if response.StatusCode != http.StatusOK {
+			log.Debugf("upload returned unexpected status %s", response.Status)
+		}
 		if _, err := io.Copy(io.Discard, response.Body); err != nil {
 			log.Debugf("upload response read failed: %v", err)
 		}
@@ -210,6 +228,12 @@ func (self *countingWriter) Write(data []byte) (int, error) {
 
 // meteredReader streams exactly `remaining` bytes by repeating `chunk`, adding
 // each byte handed to the transport to the shared counter as it goes.
+//
+// Bytes are counted when the transport reads them, which matches how the
+// browser test and typical speed tests measure upload. A small tail that is
+// buffered by the transport or the kernel but not yet on the wire when the
+// deadline fires is therefore included; over a multi-second run across many
+// connections this is negligible.
 type meteredReader struct {
 	remaining int64
 	chunk     []byte

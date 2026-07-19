@@ -24,6 +24,7 @@ test:
 
 lint:
 	golangci-lint run ./...
+	@command -v mulint >/dev/null 2>&1 && mulint -test=false ./... || echo "mulint not installed; skipping"
 
 format:
 	gofmt -s -w .
