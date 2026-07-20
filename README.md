@@ -26,7 +26,8 @@ Mbps with a live readout.
 
 The test server negotiates TLS 1.2 with the RSA cipher `AES256-GCM-SHA384`,
 which Go does not offer by default; the client enables it explicitly so the
-handshake succeeds.
+handshake succeeds. The same server also exposes an **unencrypted** mirror — see
+[Plain HTTP](#plain-http-avoiding-tls-overhead).
 
 ## Install
 
@@ -98,6 +99,29 @@ Use `--json` for machine-readable results only (no header or live progress):
   "upload": { "mbps": 68.50, "bytes": 42827776, "seconds": 5.00 }
 }
 ```
+
+## Plain HTTP (avoiding TLS overhead)
+
+The regional server also runs an **unencrypted mirror** on port `12347` (next to
+the HTTPS server on `12348`), serving the same `/shmfile/<N>` and `/upload`
+endpoints. Point `--server` at it to skip TLS entirely:
+
+```sh
+10000speedtest --server http://gz.10000gd.tech:12347
+```
+
+This matters on hardware **without AES acceleration**. The HTTPS endpoint only
+negotiates AES-GCM (it rejects ChaCha20 and TLS 1.3), so a CPU that does AES in
+software — for example a 32-bit ARM (`armv7l`) access point — becomes
+crypto-bound and caps far below the link speed (e.g. ~200 Mbps while `iperf3`
+shows multi-gigabit). Plain HTTP removes the encryption, so you measure the
+network instead of the CPU. On x86-64 and ARM64, which have hardware AES, the
+default HTTPS endpoint already runs at line rate, so this is unnecessary.
+
+The traffic is unencrypted, which is fine for a throughput test. Note that some
+gateways with deep-packet-inspection / IPS may filter plaintext HTTP on
+non-standard ports; if `12347` times out from a device but `12348` works, check
+the firewall on its path.
 
 ## Flags
 
