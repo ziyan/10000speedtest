@@ -30,7 +30,7 @@ func Run(version, commit string, arguments []string) {
 	}
 
 	if err := command.Run(context.Background(), arguments); err != nil {
-		log.Errorf("%v", err)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }

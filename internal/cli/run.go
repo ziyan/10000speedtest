@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/urfave/cli/v3"
 
@@ -43,9 +44,31 @@ func run(ctx context.Context, command *cli.Command) error {
 	}
 
 	if config.JSONOutput {
-		return printJson(config, download, upload)
+		if err := printJson(config, download, upload); err != nil {
+			return err
+		}
 	}
-	return nil
+
+	// A stage that ran but moved no data means the server was unreachable or
+	// every request failed; report it so the process exits non-zero.
+	return stageFailure(download, upload)
+}
+
+// stageFailure returns an error naming every stage that ran but transferred no
+// data, or nil when the run succeeded.
+func stageFailure(download, upload *speedtest.Result) error {
+	var failed []string
+	if download != nil && download.Bytes == 0 {
+		failed = append(failed, "download")
+	}
+	if upload != nil && upload.Bytes == 0 {
+		failed = append(failed, "upload")
+	}
+	if len(failed) == 0 {
+		return nil
+	}
+	return fmt.Errorf("cli: %s transferred no data; check --server and connectivity (use --log-level debug for details)",
+		strings.Join(failed, " and "))
 }
 
 // stageJson is the JSON shape of one stage's result.

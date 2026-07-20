@@ -135,9 +135,6 @@ func (self *Tester) runStage(name string, worker func(context.Context, *atomic.I
 		MegabitsPerSecond: float64(totalBytes) * 8 / elapsed.Seconds() / 1e6,
 	}
 	render.finish(result)
-	if totalBytes == 0 {
-		log.Warningf("%s stage transferred no data; check --server and connectivity (use --log-level debug for details)", name)
-	}
 	return result
 }
 

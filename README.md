@@ -114,6 +114,30 @@ Use `--json` for machine-readable results only (no header or live progress):
 
 Set `NO_COLOR` in the environment to draw the chart without ANSI colors.
 
+## Exit status
+
+The exit code reflects whether the test succeeded:
+
+- `0` — every requested stage transferred data.
+- non-zero — a stage that ran moved no data (the server was unreachable or every
+  request failed); the failing stage is named on stderr. In `--json` mode the
+  JSON is still written to stdout before the process exits non-zero.
+
+This makes the tool safe to use in scripts:
+
+```sh
+if 10000speedtest --json --duration 5s > result.json; then
+  echo "ok"
+else
+  echo "speed test failed" >&2
+fi
+```
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code conventions,
+and how to cut a release.
+
 ## License
 
 [MIT](LICENSE)
