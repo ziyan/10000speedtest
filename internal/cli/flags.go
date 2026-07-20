@@ -53,6 +53,11 @@ var flags = []cli.Flag{
 		Usage: "print only the final results as JSON (no live progress)",
 	},
 	&cli.StringFlag{
+		Name:  "interface",
+		Value: "",
+		Usage: "bind connections to a network interface name or source IP (needs matching source routing)",
+	},
+	&cli.StringFlag{
 		Name:  "log-level",
 		Value: "info",
 		Usage: "log level (debug, info, notice, warning, error)",

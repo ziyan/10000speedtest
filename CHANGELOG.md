@@ -4,6 +4,13 @@ All notable changes to 10000speedtest will be documented in this file.
 
 The format is based loosely on Keep a Changelog, and versions are recorded using repository tags.
 
+## [0.4.0]
+
+### Added
+
+- `--interface` flag to bind the test's connections to a specific network interface (by name) or source IP, for measuring a single NIC on a multi-homed host. Requires matching source routing so the interface's IP egresses that interface.
+- `scripts/dual-interface.sh` to run the test across several interfaces in parallel and report the combined throughput.
+
 ## [0.3.0]
 
 ### Added

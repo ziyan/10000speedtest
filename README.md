@@ -112,6 +112,7 @@ Use `--json` for machine-readable results only (no header or live progress):
 | `--insecure`      | `true`                           | skip TLS certificate verification                  |
 | `--chart`         | `true`                           | live colored bar chart (auto-off when not a TTY)   |
 | `--json`          | `false`                          | print only the final results as JSON               |
+| `--interface`     | (none)                           | bind connections to an interface name or source IP |
 | `--log-level`     | `info`                           | log level (`debug`, `info`, `notice`, …)           |
 
 Set `NO_COLOR` in the environment to draw the chart without ANSI colors.
@@ -134,6 +135,49 @@ else
   echo "speed test failed" >&2
 fi
 ```
+
+## Multiple interfaces
+
+`--interface` binds the test's connections to a specific NIC, given either an
+interface name or a source IP:
+
+```sh
+10000speedtest --interface eno1
+10000speedtest --interface 192.168.1.3
+```
+
+For this to actually use that NIC, the host must **source-route** the NIC's IP
+out that NIC. A non-default interface typically has no internet route, so add a
+policy-routing table for it (Linux example, for `eno2` = `192.168.1.3/24`,
+gateway `192.168.1.1`):
+
+```sh
+ip route replace 192.168.1.0/24 dev eno2 proto kernel scope link src 192.168.1.3 table 200
+ip route replace default via 192.168.1.1 dev eno2 table 200
+ip rule add from 192.168.1.3 lookup 200
+```
+
+Both the connected route **and** the default route are needed in the table, or
+name resolution / on-link delivery for that source can fail.
+
+`scripts/dual-interface.sh` runs the test on several interfaces at once and sums
+the result:
+
+```sh
+SPEEDTEST_BIN=./10000speedtest MODE=download DURATION=10s scripts/dual-interface.sh eno1 eno2
+```
+
+```
+interface           download          upload
+eno1             484.41 Mbps       0.00 Mbps
+eno2             184.44 Mbps       0.00 Mbps
+COMBINED         668.85 Mbps       0.00 Mbps
+```
+
+Note: running two NICs only beats one when they have independent bandwidth up to
+a shared uplink that is faster than a single NIC. If the interfaces share the
+same uplink (same public IP) and that uplink is the bottleneck, the combined
+figure is just the one pipe split in two.
 
 ## Contributing
 

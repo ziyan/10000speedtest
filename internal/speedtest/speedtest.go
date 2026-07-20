@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	mathrand "math/rand"
+	"net"
 	"net/http"
 	"strconv"
 	"sync"
@@ -46,6 +47,9 @@ type Config struct {
 	Insecure     bool
 	Chart        bool
 	JSONOutput   bool
+	// Interface binds outgoing connections to a local network interface (by name)
+	// or source IP. Empty uses the default route.
+	Interface string
 }
 
 // Result holds the measured throughput of one stage.
@@ -62,9 +66,21 @@ type Tester struct {
 	client *http.Client
 }
 
-// New builds a Tester with an HTTP client tuned for the test server.
-func New(config Config) *Tester {
+// New builds a Tester with an HTTP client tuned for the test server. It returns
+// an error if Config.Interface is set but cannot be resolved to a local address.
+func New(config Config) (*Tester, error) {
+	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+	if config.Interface != "" {
+		localAddress, err := resolveLocalAddress(config.Interface)
+		if err != nil {
+			return nil, err
+		}
+		dialer.LocalAddr = localAddress
+		log.Debugf("binding connections to %s (%s)", config.Interface, localAddress)
+	}
+
 	transport := &http.Transport{
+		DialContext: dialer.DialContext,
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: config.Insecure, //nolint:gosec // the test port serves a non-matching cert by design
 			MinVersion:         tls.VersionTLS12,
@@ -82,7 +98,32 @@ func New(config Config) *Tester {
 		MaxIdleConnsPerHost: config.Connections,
 		ForceAttemptHTTP2:   false,
 	}
-	return &Tester{config: config, client: &http.Client{Transport: transport}}
+	return &Tester{config: config, client: &http.Client{Transport: transport}}, nil
+}
+
+// resolveLocalAddress turns an interface name or source IP into a local TCP
+// address to bind outgoing connections to. Binding by interface name uses the
+// interface's first IPv4 address; source-based routing must then send that
+// address out the intended NIC.
+func resolveLocalAddress(value string) (*net.TCPAddr, error) {
+	if parsed := net.ParseIP(value); parsed != nil {
+		return &net.TCPAddr{IP: parsed}, nil
+	}
+	networkInterface, err := net.InterfaceByName(value)
+	if err != nil {
+		return nil, fmt.Errorf("speedtest: interface %q not found: %w", value, err)
+	}
+	addresses, err := networkInterface.Addrs()
+	if err != nil {
+		return nil, fmt.Errorf("speedtest: cannot read addresses of interface %q: %w", value, err)
+	}
+	for _, address := range addresses {
+		ipNet, ok := address.(*net.IPNet)
+		if ok && ipNet.IP.To4() != nil && !ipNet.IP.IsLoopback() {
+			return &net.TCPAddr{IP: ipNet.IP}, nil
+		}
+	}
+	return nil, fmt.Errorf("speedtest: interface %q has no usable IPv4 address", value)
 }
 
 // Download runs the download stage and returns its measured throughput.

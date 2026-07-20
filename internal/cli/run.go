@@ -23,6 +23,7 @@ func run(ctx context.Context, command *cli.Command) error {
 		Insecure:     command.Bool("insecure"),
 		Chart:        command.Bool("chart"),
 		JSONOutput:   command.Bool("json"),
+		Interface:    command.String("interface"),
 	}
 	mode := command.String("mode")
 
@@ -32,7 +33,10 @@ func run(ctx context.Context, command *cli.Command) error {
 		fmt.Printf("Duration:    %s per stage\n\n", config.Duration)
 	}
 
-	tester := speedtest.New(config)
+	tester, err := speedtest.New(config)
+	if err != nil {
+		return err
+	}
 	var download, upload *speedtest.Result
 	if mode == "download" || mode == "both" {
 		result := tester.Download()

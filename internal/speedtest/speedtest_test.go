@@ -32,6 +32,27 @@ func testConfig(server string) Config {
 	}
 }
 
+func mustNew(t *testing.T, config Config) *Tester {
+	t.Helper()
+	tester, err := New(config)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	return tester
+}
+
+// TestResolveLocalAddress covers source-IP parsing, loopback lookup by name,
+// and the not-found error.
+func TestResolveLocalAddress(t *testing.T) {
+	address, err := resolveLocalAddress("127.0.0.1")
+	if err != nil || address.IP.String() != "127.0.0.1" {
+		t.Fatalf("expected 127.0.0.1, got %v (err %v)", address, err)
+	}
+	if _, err := resolveLocalAddress("definitely-not-an-interface"); err == nil {
+		t.Fatal("expected an error for an unknown interface")
+	}
+}
+
 // runWorkerUntilBytes runs worker until it has counted at least one byte, then
 // cancels it and returns the total. It stops as soon as data flows (rather than
 // waiting out a fixed deadline), so the assertion does not depend on timing; the
@@ -79,7 +100,7 @@ func TestDownloadWorkerCountsBytes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tester := New(testConfig(server.URL))
+	tester := mustNew(t, testConfig(server.URL))
 	if runWorkerUntilBytes(t, tester.downloadWorker) == 0 {
 		t.Fatal("expected downloaded bytes to be counted, got 0")
 	}
@@ -93,7 +114,7 @@ func TestDownloadWorkerSkipsNon200(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tester := New(testConfig(server.URL))
+	tester := mustNew(t, testConfig(server.URL))
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
@@ -113,7 +134,7 @@ func TestUploadWorkerCountsBytes(t *testing.T) {
 	}))
 	defer server.Close()
 
-	tester := New(testConfig(server.URL))
+	tester := mustNew(t, testConfig(server.URL))
 	if runWorkerUntilBytes(t, tester.uploadWorker) == 0 {
 		t.Fatal("expected uploaded bytes to be counted, got 0")
 	}
