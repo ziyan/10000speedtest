@@ -57,7 +57,7 @@ func TestResolveLocalAddress(t *testing.T) {
 // cancels it and returns the total. It stops as soon as data flows (rather than
 // waiting out a fixed deadline), so the assertion does not depend on timing; the
 // 5s ceiling only trips if the worker never transfers anything.
-func runWorkerUntilBytes(t *testing.T, worker func(context.Context, *atomic.Int64)) int64 {
+func runWorkerUntilBytes(t *testing.T, client *http.Client, worker func(context.Context, *http.Client, *atomic.Int64)) int64 {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -65,7 +65,7 @@ func runWorkerUntilBytes(t *testing.T, worker func(context.Context, *atomic.Int6
 	counter := &atomic.Int64{}
 	done := make(chan struct{})
 	go func() {
-		worker(ctx, counter)
+		worker(ctx, client, counter)
 		close(done)
 	}()
 
@@ -101,7 +101,7 @@ func TestDownloadWorkerCountsBytes(t *testing.T) {
 	defer server.Close()
 
 	tester := mustNew(t, testConfig(server.URL))
-	if runWorkerUntilBytes(t, tester.downloadWorker) == 0 {
+	if runWorkerUntilBytes(t, tester.clients[0].client, tester.downloadWorker) == 0 {
 		t.Fatal("expected downloaded bytes to be counted, got 0")
 	}
 }
@@ -119,7 +119,7 @@ func TestDownloadWorkerSkipsNon200(t *testing.T) {
 	defer cancel()
 
 	counter := &atomic.Int64{}
-	tester.downloadWorker(ctx, counter)
+	tester.downloadWorker(ctx, tester.clients[0].client, counter)
 
 	if counter.Load() != 0 {
 		t.Fatalf("expected 0 bytes counted for non-200 responses, got %d", counter.Load())
@@ -135,8 +135,49 @@ func TestUploadWorkerCountsBytes(t *testing.T) {
 	defer server.Close()
 
 	tester := mustNew(t, testConfig(server.URL))
-	if runWorkerUntilBytes(t, tester.uploadWorker) == 0 {
+	if runWorkerUntilBytes(t, tester.clients[0].client, tester.uploadWorker) == 0 {
 		t.Fatal("expected uploaded bytes to be counted, got 0")
+	}
+}
+
+// TestMultiInterfaceAggregates runs a download over two loopback-bound clients
+// and checks the per-interface results sum to the combined total.
+func TestMultiInterfaceAggregates(t *testing.T) {
+	payload := make([]byte, 64*1024)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if !strings.HasPrefix(request.URL.Path, "/shmfile/") {
+			http.NotFound(writer, request)
+			return
+		}
+		for index := 0; index < 16; index++ {
+			if _, err := writer.Write(payload); err != nil {
+				return
+			}
+		}
+	}))
+	defer server.Close()
+
+	config := testConfig(server.URL)
+	config.Interfaces = []string{"127.0.0.1", "127.0.0.1"}
+	tester := mustNew(t, config)
+
+	result := tester.Download()
+
+	if len(tester.clients) != 2 {
+		t.Fatalf("expected 2 bound clients, got %d", len(tester.clients))
+	}
+	if len(result.PerInterface) != 2 {
+		t.Fatalf("expected 2 per-interface results, got %d", len(result.PerInterface))
+	}
+	if result.Bytes == 0 {
+		t.Fatal("expected the combined download to move data")
+	}
+	sum := int64(0)
+	for _, item := range result.PerInterface {
+		sum += item.Bytes
+	}
+	if sum != result.Bytes {
+		t.Fatalf("per-interface bytes %d should sum to combined %d", sum, result.Bytes)
 	}
 }
 

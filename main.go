@@ -11,7 +11,7 @@ import (
 
 // version and commit are overridden at build time via -ldflags.
 var (
-	version = "0.4.0"
+	version = "0.5.0"
 	commit  = "unknown"
 )
 
