@@ -41,6 +41,36 @@ Or download a prebuilt binary from the [releases](https://github.com/ziyan/10000
 make build
 ```
 
+### UniFi devices (ARM)
+
+The tool is a static binary (`CGO_ENABLED=0`), so it runs on stock UniFi
+firmware — copy it over with `scp`/`rsync` and run it.
+
+- **UniFi gateway** (ARM64 — e.g. the IPQ9574 / Dream Machine class): use the
+  `linux_arm64` release asset, or cross-compile:
+
+  ```sh
+  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags '-s -w' -o 10000speedtest .
+  ```
+
+- **UniFi access points** (32-bit ARM, `armv7l` — e.g. U6/U7 series): these are
+  not covered by the releases, so build one:
+
+  ```sh
+  CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags '-s -w' -o 10000speedtest .
+  ```
+
+Check a device's architecture with `uname -m` (`aarch64` → `arm64`, `armv7l` →
+`arm`/`GOARM=7`).
+
+Two things to expect on an **access point**: it has no hardware AES, so use the
+[plain HTTP](#plain-http-avoiding-tls-overhead) endpoint or the HTTPS test will
+be CPU-bound (~200 Mbps); and running the test *on* the AP measures the AP's own
+CPU, not the throughput of clients forwarded through it (that path uses hardware
+offload). Use the AP's built-in `iperf`/`iperf3`, or a real client, to measure
+its actual link. The gateway (ARM64, hardware AES) runs the HTTPS test at line
+rate.
+
 ## Usage
 
 ```sh
