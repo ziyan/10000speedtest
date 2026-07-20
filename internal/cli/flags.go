@@ -52,10 +52,9 @@ var flags = []cli.Flag{
 		Value: false,
 		Usage: "print only the final results as JSON (no live progress)",
 	},
-	&cli.StringFlag{
+	&cli.StringSliceFlag{
 		Name:  "interface",
-		Value: "",
-		Usage: "bind connections to a network interface name or source IP (needs matching source routing)",
+		Usage: "bind to a network interface name or source IP; repeat to test several at once and aggregate (needs matching source routing)",
 	},
 	&cli.StringFlag{
 		Name:  "log-level",

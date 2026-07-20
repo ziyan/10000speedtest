@@ -32,6 +32,29 @@ func TestStageFailure(t *testing.T) {
 	}
 }
 
+// TestStageJsonInterfaces checks that a per-interface breakdown appears only
+// when more than one interface was tested.
+func TestStageJsonInterfaces(t *testing.T) {
+	single := stageJsonFrom(&speedtest.Result{
+		Bytes: 100, Elapsed: time.Second, MegabitsPerSecond: 1,
+		PerInterface: []speedtest.InterfaceResult{{Interface: "eno1", Bytes: 100, MegabitsPerSecond: 1}},
+	})
+	if len(single.Interfaces) != 0 {
+		t.Fatalf("a single interface should not emit a breakdown, got %d", len(single.Interfaces))
+	}
+
+	multi := stageJsonFrom(&speedtest.Result{
+		Bytes: 300, Elapsed: time.Second, MegabitsPerSecond: 3,
+		PerInterface: []speedtest.InterfaceResult{
+			{Interface: "eno1", Bytes: 200, MegabitsPerSecond: 2},
+			{Interface: "eno2", Bytes: 100, MegabitsPerSecond: 1},
+		},
+	})
+	if len(multi.Interfaces) != 2 || multi.Interfaces[0].Interface != "eno1" {
+		t.Fatalf("expected a two-interface breakdown, got %+v", multi.Interfaces)
+	}
+}
+
 // TestResultJsonShape checks the JSON encoding: present stages are included,
 // absent stages are omitted, and the field values come from the results.
 func TestResultJsonShape(t *testing.T) {

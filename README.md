@@ -146,7 +146,21 @@ interface name or a source IP:
 10000speedtest --interface 192.168.1.3
 ```
 
-For this to actually use that NIC, the host must **source-route** the NIC's IP
+Repeat `--interface` to test several NICs **at once** — each runs
+`--connections` connections and the results are aggregated, with a per-interface
+breakdown:
+
+```sh
+10000speedtest --interface eno1 --interface eno2
+```
+
+```
+Download:   1089.10 Mbps   (1.27 GiB in 10.0s)
+  via eno1:   639.70 Mbps
+  via eno2:   449.40 Mbps
+```
+
+For this to actually use each NIC, the host must **source-route** the NIC's IP
 out that NIC. A non-default interface typically has no internet route, so add a
 policy-routing table for it (Linux example, for `eno2` = `192.168.1.3/24`,
 gateway `192.168.1.1`):
@@ -159,20 +173,6 @@ ip rule add from 192.168.1.3 lookup 200
 
 Both the connected route **and** the default route are needed in the table, or
 name resolution / on-link delivery for that source can fail.
-
-`scripts/dual-interface.sh` runs the test on several interfaces at once and sums
-the result:
-
-```sh
-SPEEDTEST_BIN=./10000speedtest MODE=download DURATION=10s scripts/dual-interface.sh eno1 eno2
-```
-
-```
-interface           download          upload
-eno1             484.41 Mbps       0.00 Mbps
-eno2             184.44 Mbps       0.00 Mbps
-COMBINED         668.85 Mbps       0.00 Mbps
-```
 
 Note: running two NICs only beats one when they have independent bandwidth up to
 a shared uplink that is faster than a single NIC. If the interfaces share the

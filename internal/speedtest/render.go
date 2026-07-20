@@ -74,6 +74,19 @@ func summaryLine(result Result) string {
 		result.Name+":", result.MegabitsPerSecond, humanBytes(result.Bytes), result.Elapsed.Seconds())
 }
 
+// interfaceBreakdown returns per-interface lines (each newline-terminated) when
+// more than one interface was tested, or an empty string otherwise.
+func interfaceBreakdown(result Result) string {
+	if len(result.PerInterface) <= 1 {
+		return ""
+	}
+	var builder strings.Builder
+	for _, item := range result.PerInterface {
+		fmt.Fprintf(&builder, "  via %-8s %8.2f Mbps\n", item.Interface+":", item.MegabitsPerSecond)
+	}
+	return builder.String()
+}
+
 // lineRenderer rewrites a single line with the current throughput; used on a
 // terminal when charting is disabled.
 type lineRenderer struct {
@@ -86,7 +99,7 @@ func (self *lineRenderer) sample(megabitsPerSecond float64) {
 }
 
 func (self *lineRenderer) finish(result Result) {
-	_, _ = fmt.Fprintf(self.output, "\r\033[K%s\n", summaryLine(result))
+	_, _ = fmt.Fprintf(self.output, "\r\033[K%s\n%s", summaryLine(result), interfaceBreakdown(result))
 }
 
 // plainRenderer prints nothing while running and only the final line; used when
@@ -99,7 +112,7 @@ type plainRenderer struct {
 func (self *plainRenderer) sample(float64) {}
 
 func (self *plainRenderer) finish(result Result) {
-	_, _ = fmt.Fprintf(self.output, "%s\n", summaryLine(result))
+	_, _ = fmt.Fprintf(self.output, "%s\n%s", summaryLine(result), interfaceBreakdown(result))
 }
 
 // silentRenderer prints nothing at all; used for JSON output.
@@ -140,7 +153,7 @@ func (self *chartRenderer) sample(megabitsPerSecond float64) {
 // finish clears the line the cursor is on (below the chart, or the warming-up
 // placeholder for a stage shorter than the warmup) and prints the summary.
 func (self *chartRenderer) finish(result Result) {
-	_, _ = fmt.Fprintf(self.output, "\r\033[K%s\n", summaryLine(result))
+	_, _ = fmt.Fprintf(self.output, "\r\033[K%s\n%s", summaryLine(result), interfaceBreakdown(result))
 }
 
 func (self *chartRenderer) render() {

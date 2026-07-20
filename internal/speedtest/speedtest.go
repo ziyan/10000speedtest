@@ -47,58 +47,94 @@ type Config struct {
 	Insecure     bool
 	Chart        bool
 	JSONOutput   bool
-	// Interface binds outgoing connections to a local network interface (by name)
-	// or source IP. Empty uses the default route.
-	Interface string
+	// Interfaces binds outgoing connections to local network interfaces (by name)
+	// or source IPs. Each interface runs Connections connections and the results
+	// are aggregated. Empty uses the default route.
+	Interfaces []string
 }
 
-// Result holds the measured throughput of one stage.
+// InterfaceResult holds one interface's contribution to a stage.
+type InterfaceResult struct {
+	Interface         string
+	Bytes             int64
+	MegabitsPerSecond float64
+}
+
+// Result holds the measured throughput of one stage. When more than one
+// interface is tested, PerInterface breaks the total down per interface.
 type Result struct {
 	Name              string
 	Bytes             int64
 	Elapsed           time.Duration
 	MegabitsPerSecond float64
+	PerInterface      []InterfaceResult
 }
 
-// Tester runs download and upload stages against a configured server.
-type Tester struct {
-	config Config
+// boundClient is an HTTP client bound to a particular interface (or the default
+// route when name is empty).
+type boundClient struct {
+	name   string
 	client *http.Client
 }
 
-// New builds a Tester with an HTTP client tuned for the test server. It returns
-// an error if Config.Interface is set but cannot be resolved to a local address.
+// Tester runs download and upload stages against a configured server, over one
+// HTTP client per configured interface.
+type Tester struct {
+	config  Config
+	clients []boundClient
+}
+
+// New builds a Tester with one HTTP client per configured interface. It returns
+// an error if any interface cannot be resolved to a local address.
 func New(config Config) (*Tester, error) {
-	dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
-	if config.Interface != "" {
-		localAddress, err := resolveLocalAddress(config.Interface)
-		if err != nil {
-			return nil, err
-		}
-		dialer.LocalAddr = localAddress
-		log.Debugf("binding connections to %s (%s)", config.Interface, localAddress)
+	tlsConfig := &tls.Config{
+		InsecureSkipVerify: config.Insecure, //nolint:gosec // the test port serves a non-matching cert by design
+		MinVersion:         tls.VersionTLS12,
+		// The test server negotiates TLS 1.2 with the RSA cipher
+		// AES256-GCM-SHA384, which Go does not offer by default. Enable the RSA
+		// suites explicitly (alongside the modern ECDHE ones) so the handshake
+		// succeeds.
+		CipherSuites: []uint16{
+			tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
+			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
+			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
+		},
 	}
 
-	transport := &http.Transport{
-		DialContext: dialer.DialContext,
-		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: config.Insecure, //nolint:gosec // the test port serves a non-matching cert by design
-			MinVersion:         tls.VersionTLS12,
-			// The test server negotiates TLS 1.2 with the RSA cipher
-			// AES256-GCM-SHA384, which Go does not offer by default. Enable the
-			// RSA suites explicitly (alongside the modern ECDHE ones) so the
-			// handshake succeeds.
-			CipherSuites: []uint16{
-				tls.TLS_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_RSA_WITH_AES_128_GCM_SHA256,
-				tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-				tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-			},
-		},
-		MaxIdleConnsPerHost: config.Connections,
-		ForceAttemptHTTP2:   false,
+	build := func(networkInterface string) (boundClient, error) {
+		dialer := &net.Dialer{Timeout: 30 * time.Second, KeepAlive: 30 * time.Second}
+		if networkInterface != "" {
+			localAddress, err := resolveLocalAddress(networkInterface)
+			if err != nil {
+				return boundClient{}, err
+			}
+			dialer.LocalAddr = localAddress
+			log.Debugf("binding connections to %s (%s)", networkInterface, localAddress)
+		}
+		transport := &http.Transport{
+			DialContext:         dialer.DialContext,
+			TLSClientConfig:     tlsConfig,
+			MaxIdleConnsPerHost: config.Connections,
+			ForceAttemptHTTP2:   false,
+		}
+		return boundClient{name: networkInterface, client: &http.Client{Transport: transport}}, nil
 	}
-	return &Tester{config: config, client: &http.Client{Transport: transport}}, nil
+
+	var clients []boundClient
+	if len(config.Interfaces) == 0 {
+		client, _ := build("") // building the default client cannot fail
+		clients = []boundClient{client}
+	} else {
+		for _, networkInterface := range config.Interfaces {
+			client, err := build(networkInterface)
+			if err != nil {
+				return nil, err
+			}
+			clients = append(clients, client)
+		}
+	}
+	return &Tester{config: config, clients: clients}, nil
 }
 
 // resolveLocalAddress turns an interface name or source IP into a local TCP
@@ -136,30 +172,37 @@ func (self *Tester) Upload() Result {
 	return self.runStage("Upload", self.uploadWorker)
 }
 
-// runStage launches Config.Connections worker goroutines that share an atomic
-// byte counter, runs them for Config.Duration, lets the selected renderer show
-// live progress, and returns the measured Result.
-func (self *Tester) runStage(name string, worker func(context.Context, *atomic.Int64)) Result {
+// runStage launches Config.Connections worker goroutines per interface, each
+// counting into its own atomic counter, runs them for Config.Duration, shows
+// live combined progress, and returns the aggregated Result.
+func (self *Tester) runStage(name string, worker func(context.Context, *http.Client, *atomic.Int64)) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), self.config.Duration)
 	defer cancel()
 
-	counter := &atomic.Int64{}
+	counters := make([]*atomic.Int64, len(self.clients))
+	for index := range counters {
+		counters[index] = &atomic.Int64{}
+	}
 	start := time.Now()
 
 	var waitGroup sync.WaitGroup
-	for index := 0; index < self.config.Connections; index++ {
-		waitGroup.Add(1)
-		go func() {
-			defer deferutil.Recover()
-			defer waitGroup.Done()
-			worker(ctx, counter)
-		}()
+	for index, bound := range self.clients {
+		client := bound.client
+		counter := counters[index]
+		for connection := 0; connection < self.config.Connections; connection++ {
+			waitGroup.Add(1)
+			go func() {
+				defer deferutil.Recover()
+				defer waitGroup.Done()
+				worker(ctx, client, counter)
+			}()
+		}
 	}
 
 	render := newRenderer(name, self.config)
 	reporterDone := make(chan struct{})
 	reporterExited := make(chan struct{})
-	go liveReporter(counter, start, reporterDone, reporterExited, render)
+	go liveReporter(counters, start, reporterDone, reporterExited, render)
 
 	waitGroup.Wait()
 	// Stop the reporter and wait for it to finish drawing so its last frame
@@ -168,21 +211,50 @@ func (self *Tester) runStage(name string, worker func(context.Context, *atomic.I
 	<-reporterExited
 
 	elapsed := time.Since(start)
-	totalBytes := counter.Load()
+	return self.buildResult(name, elapsed, counters, render)
+}
+
+// buildResult aggregates per-interface counters into a Result and finalizes the
+// renderer.
+func (self *Tester) buildResult(name string, elapsed time.Duration, counters []*atomic.Int64, render renderer) Result {
+	seconds := elapsed.Seconds()
+	total := int64(0)
+	perInterface := make([]InterfaceResult, 0, len(self.clients))
+	for index, bound := range self.clients {
+		bytes := counters[index].Load()
+		total += bytes
+		if bound.name != "" {
+			perInterface = append(perInterface, InterfaceResult{
+				Interface:         bound.name,
+				Bytes:             bytes,
+				MegabitsPerSecond: float64(bytes) * 8 / seconds / 1e6,
+			})
+		}
+	}
 	result := Result{
 		Name:              name,
-		Bytes:             totalBytes,
+		Bytes:             total,
 		Elapsed:           elapsed,
-		MegabitsPerSecond: float64(totalBytes) * 8 / elapsed.Seconds() / 1e6,
+		MegabitsPerSecond: float64(total) * 8 / seconds / 1e6,
+		PerInterface:      perInterface,
 	}
 	render.finish(result)
 	return result
 }
 
-// liveReporter samples the instantaneous throughput a few times a second and
-// feeds each sample to the renderer. It closes exited when it returns so
-// runStage can wait for it to stop drawing.
-func liveReporter(counter *atomic.Int64, start time.Time, done, exited chan struct{}, render renderer) {
+// sumCounters returns the total bytes counted across every interface.
+func sumCounters(counters []*atomic.Int64) int64 {
+	total := int64(0)
+	for _, counter := range counters {
+		total += counter.Load()
+	}
+	return total
+}
+
+// liveReporter samples the combined instantaneous throughput a few times a
+// second and feeds each sample to the renderer. It closes exited when it
+// returns so runStage can wait for it to stop drawing.
+func liveReporter(counters []*atomic.Int64, start time.Time, done, exited chan struct{}, render renderer) {
 	defer deferutil.Recover()
 	defer close(exited)
 	ticker := time.NewTicker(reportInterval)
@@ -195,7 +267,7 @@ func liveReporter(counter *atomic.Int64, start time.Time, done, exited chan stru
 		case <-done:
 			return
 		case now := <-ticker.C:
-			currentBytes := counter.Load()
+			currentBytes := sumCounters(counters)
 			interval := now.Sub(previousTime).Seconds()
 			if interval <= 0 {
 				continue
@@ -210,7 +282,7 @@ func liveReporter(counter *atomic.Int64, start time.Time, done, exited chan stru
 
 // downloadWorker repeatedly downloads /shmfile/<N> until the context is
 // cancelled, adding every received byte to the shared counter.
-func (self *Tester) downloadWorker(ctx context.Context, counter *atomic.Int64) {
+func (self *Tester) downloadWorker(ctx context.Context, client *http.Client, counter *atomic.Int64) {
 	writer := &countingWriter{counter: counter}
 	buffer := make([]byte, 256*1024)
 	for ctx.Err() == nil {
@@ -219,7 +291,7 @@ func (self *Tester) downloadWorker(ctx context.Context, counter *atomic.Int64) {
 		if err != nil {
 			return
 		}
-		response, err := self.client.Do(request)
+		response, err := client.Do(request)
 		if err != nil {
 			log.Debugf("download request failed: %v", err)
 			continue
@@ -240,7 +312,7 @@ func (self *Tester) downloadWorker(ctx context.Context, counter *atomic.Int64) {
 
 // uploadWorker repeatedly posts a body to /upload until the context is
 // cancelled, adding every sent byte to the shared counter.
-func (self *Tester) uploadWorker(ctx context.Context, counter *atomic.Int64) {
+func (self *Tester) uploadWorker(ctx context.Context, client *http.Client, counter *atomic.Int64) {
 	chunk := make([]byte, 128*1024)
 	_, _ = rand.Read(chunk)
 	totalBytes := int64(self.config.UploadSize) * bytesPerMebibyte
@@ -256,7 +328,7 @@ func (self *Tester) uploadWorker(ctx context.Context, counter *atomic.Int64) {
 		request.Header.Set("Content-Type", "application/octet-stream")
 		request.Header.Set("Origin", requestOrigin)
 
-		response, err := self.client.Do(request)
+		response, err := client.Do(request)
 		if err != nil {
 			log.Debugf("upload request failed: %v", err)
 			continue

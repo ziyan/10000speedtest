@@ -23,7 +23,7 @@ func run(ctx context.Context, command *cli.Command) error {
 		Insecure:     command.Bool("insecure"),
 		Chart:        command.Bool("chart"),
 		JSONOutput:   command.Bool("json"),
-		Interface:    command.String("interface"),
+		Interfaces:   command.StringSlice("interface"),
 	}
 	mode := command.String("mode")
 
@@ -75,11 +75,19 @@ func stageFailure(download, upload *speedtest.Result) error {
 		strings.Join(failed, " and "))
 }
 
+// interfaceJson is the JSON shape of one interface's contribution to a stage.
+type interfaceJson struct {
+	Interface string  `json:"interface"`
+	Mbps      float64 `json:"mbps"`
+	Bytes     int64   `json:"bytes"`
+}
+
 // stageJson is the JSON shape of one stage's result.
 type stageJson struct {
-	Mbps    float64 `json:"mbps"`
-	Bytes   int64   `json:"bytes"`
-	Seconds float64 `json:"seconds"`
+	Mbps       float64         `json:"mbps"`
+	Bytes      int64           `json:"bytes"`
+	Seconds    float64         `json:"seconds"`
+	Interfaces []interfaceJson `json:"interfaces,omitempty"`
 }
 
 // resultJson is the JSON shape of a whole run.
@@ -111,9 +119,19 @@ func stageJsonFrom(result *speedtest.Result) *stageJson {
 	if result == nil {
 		return nil
 	}
-	return &stageJson{
+	stage := &stageJson{
 		Mbps:    result.MegabitsPerSecond,
 		Bytes:   result.Bytes,
 		Seconds: result.Elapsed.Seconds(),
 	}
+	if len(result.PerInterface) > 1 {
+		for _, item := range result.PerInterface {
+			stage.Interfaces = append(stage.Interfaces, interfaceJson{
+				Interface: item.Interface,
+				Mbps:      item.MegabitsPerSecond,
+				Bytes:     item.Bytes,
+			})
+		}
+	}
+	return stage
 }
