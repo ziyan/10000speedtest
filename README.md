@@ -7,6 +7,8 @@ network. It reproduces, on the terminal, the test that the web page at
 > The test servers (`gz.10000gd.tech`) are only reachable from within the China
 > Telecom Guangdong network, so the tool must be run from a host on that network.
 
+![Live download and upload bar charts in the terminal](docs/chart.png)
+
 ## How it works
 
 The web client drives its test with many parallel HTTP connections against a
