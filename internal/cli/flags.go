@@ -47,6 +47,11 @@ var flags = []cli.Flag{
 		Value: true,
 		Usage: "draw a live colored bar chart (falls back to a single line when output is not a terminal)",
 	},
+	&cli.BoolFlag{
+		Name:  "json",
+		Value: false,
+		Usage: "print only the final results as JSON (no live progress)",
+	},
 	&cli.StringFlag{
 		Name:  "log-level",
 		Value: "info",

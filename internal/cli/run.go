@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/urfave/cli/v3"
@@ -9,8 +10,8 @@ import (
 	"github.com/ziyan/10000speedtest/internal/speedtest"
 )
 
-// run is the urfave/cli action: it builds the test configuration from the flags
-// and runs the requested stages.
+// run is the urfave/cli action: it builds the test configuration from the flags,
+// runs the requested stages, and prints results as text or JSON.
 func run(ctx context.Context, command *cli.Command) error {
 	config := speedtest.Config{
 		Server:       command.String("server"),
@@ -20,19 +21,72 @@ func run(ctx context.Context, command *cli.Command) error {
 		UploadSize:   command.Int("upload-size"),
 		Insecure:     command.Bool("insecure"),
 		Chart:        command.Bool("chart"),
+		JSONOutput:   command.Bool("json"),
 	}
 	mode := command.String("mode")
 
-	fmt.Printf("Server:      %s\n", config.Server)
-	fmt.Printf("Connections: %d\n", config.Connections)
-	fmt.Printf("Duration:    %s per stage\n\n", config.Duration)
+	if !config.JSONOutput {
+		fmt.Printf("Server:      %s\n", config.Server)
+		fmt.Printf("Connections: %d\n", config.Connections)
+		fmt.Printf("Duration:    %s per stage\n\n", config.Duration)
+	}
 
 	tester := speedtest.New(config)
+	var download, upload *speedtest.Result
 	if mode == "download" || mode == "both" {
-		tester.Download()
+		result := tester.Download()
+		download = &result
 	}
 	if mode == "upload" || mode == "both" {
-		tester.Upload()
+		result := tester.Upload()
+		upload = &result
+	}
+
+	if config.JSONOutput {
+		return printJson(config, download, upload)
 	}
 	return nil
+}
+
+// stageJson is the JSON shape of one stage's result.
+type stageJson struct {
+	Mbps    float64 `json:"mbps"`
+	Bytes   int64   `json:"bytes"`
+	Seconds float64 `json:"seconds"`
+}
+
+// resultJson is the JSON shape of a whole run.
+type resultJson struct {
+	Server          string     `json:"server"`
+	Connections     int        `json:"connections"`
+	DurationSeconds float64    `json:"durationSeconds"`
+	Download        *stageJson `json:"download,omitempty"`
+	Upload          *stageJson `json:"upload,omitempty"`
+}
+
+func printJson(config speedtest.Config, download, upload *speedtest.Result) error {
+	output := resultJson{
+		Server:          config.Server,
+		Connections:     config.Connections,
+		DurationSeconds: config.Duration.Seconds(),
+		Download:        stageJsonFrom(download),
+		Upload:          stageJsonFrom(upload),
+	}
+	encoded, err := json.MarshalIndent(output, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(encoded))
+	return nil
+}
+
+func stageJsonFrom(result *speedtest.Result) *stageJson {
+	if result == nil {
+		return nil
+	}
+	return &stageJson{
+		Mbps:    result.MegabitsPerSecond,
+		Bytes:   result.Bytes,
+		Seconds: result.Elapsed.Seconds(),
+	}
 }

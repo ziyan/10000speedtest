@@ -45,6 +45,15 @@ type Config struct {
 	UploadSize   int
 	Insecure     bool
 	Chart        bool
+	JSONOutput   bool
+}
+
+// Result holds the measured throughput of one stage.
+type Result struct {
+	Name              string
+	Bytes             int64
+	Elapsed           time.Duration
+	MegabitsPerSecond float64
 }
 
 // Tester runs download and upload stages against a configured server.
@@ -76,20 +85,20 @@ func New(config Config) *Tester {
 	return &Tester{config: config, client: &http.Client{Transport: transport}}
 }
 
-// Download runs the download stage, printing a live Mbps readout.
-func (self *Tester) Download() {
-	self.runStage("Download", self.downloadWorker)
+// Download runs the download stage and returns its measured throughput.
+func (self *Tester) Download() Result {
+	return self.runStage("Download", self.downloadWorker)
 }
 
-// Upload runs the upload stage, printing a live Mbps readout.
-func (self *Tester) Upload() {
-	self.runStage("Upload", self.uploadWorker)
+// Upload runs the upload stage and returns its measured throughput.
+func (self *Tester) Upload() Result {
+	return self.runStage("Upload", self.uploadWorker)
 }
 
 // runStage launches Config.Connections worker goroutines that share an atomic
-// byte counter, runs them for Config.Duration, and prints a live readout
-// followed by the average throughput in Mbps.
-func (self *Tester) runStage(name string, worker func(context.Context, *atomic.Int64)) {
+// byte counter, runs them for Config.Duration, lets the selected renderer show
+// live progress, and returns the measured Result.
+func (self *Tester) runStage(name string, worker func(context.Context, *atomic.Int64)) Result {
 	ctx, cancel := context.WithTimeout(context.Background(), self.config.Duration)
 	defer cancel()
 
@@ -106,27 +115,30 @@ func (self *Tester) runStage(name string, worker func(context.Context, *atomic.I
 		}()
 	}
 
-	render := newRenderer(name, self.config.Chart)
+	render := newRenderer(name, self.config)
 	reporterDone := make(chan struct{})
 	reporterExited := make(chan struct{})
 	go liveReporter(counter, start, reporterDone, reporterExited, render)
 
 	waitGroup.Wait()
-	// Stop the reporter and wait for it to finish printing so its last progress
-	// frame cannot land after the summary line below and corrupt the output.
+	// Stop the reporter and wait for it to finish drawing so its last frame
+	// cannot land after the summary line and corrupt the output.
 	close(reporterDone)
 	<-reporterExited
 
-	elapsed := time.Since(start).Seconds()
+	elapsed := time.Since(start)
 	totalBytes := counter.Load()
-	megabitsPerSecond := float64(totalBytes) * 8 / elapsed / 1e6
-	// A leading \r + trailing pad overwrites the single live line in line mode;
-	// in chart mode the cursor is already on a fresh line below the chart.
-	fmt.Printf("\r%-10s %8.2f Mbps   (%s in %.1fs)%s\n",
-		name+":", megabitsPerSecond, humanBytes(totalBytes), elapsed, "          ")
+	result := Result{
+		Name:              name,
+		Bytes:             totalBytes,
+		Elapsed:           elapsed,
+		MegabitsPerSecond: float64(totalBytes) * 8 / elapsed.Seconds() / 1e6,
+	}
+	render.finish(result)
 	if totalBytes == 0 {
 		log.Warningf("%s stage transferred no data; check --server and connectivity (use --log-level debug for details)", name)
 	}
+	return result
 }
 
 // liveReporter samples the instantaneous throughput a few times a second and

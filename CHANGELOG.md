@@ -4,6 +4,17 @@ All notable changes to 10000speedtest will be documented in this file.
 
 The format is based loosely on Keep a Changelog, and versions are recorded using repository tags.
 
+## [0.3.0]
+
+### Added
+
+- `--json` flag: print only the final results as a single JSON object (server, connections, duration, and per-stage mbps/bytes/seconds), with no header or live progress.
+
+### Changed
+
+- The bar chart now sizes itself to the terminal width instead of a fixed 50 columns, and the header is truncated so it cannot wrap and desync the redraw on narrow terminals.
+- When stdout is not a terminal (piped or redirected), the tool no longer rewrites a progress line; it prints just the header and the final per-stage summary.
+
 ## [0.2.0]
 
 ### Added

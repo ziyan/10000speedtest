@@ -6,6 +6,8 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 // reportInterval is how often the live throughput is sampled and drawn.
@@ -20,36 +22,92 @@ const chartWarmUp = time.Second
 const warmUpSamples = int(chartWarmUp / reportInterval)
 
 const (
-	chartHeight = 8  // number of bar rows
-	chartWidth  = 50 // maximum number of bars kept on screen
+	chartHeight          = 8  // number of bar rows
+	chartGutter          = 8  // display columns used by the "%6.0f │" axis label
+	minChartWidth        = 10 // fewest bars to draw when the terminal is very narrow
+	defaultTerminalWidth = 80 // assumed width when the terminal size is unknown
 )
 
 // barBlocks maps an eighth level (0..8) to a partial-height block glyph.
 var barBlocks = []rune{' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
 
-// renderer draws live throughput samples for a single stage.
+// renderer shows live progress for a stage and prints its final summary.
 type renderer interface {
 	// sample records an instantaneous throughput reading in Mbps and redraws.
 	sample(megabitsPerSecond float64)
+	// finish prints the final one-line summary for the stage.
+	finish(result Result)
 }
 
-// newRenderer returns a colored bar chart when chart output is requested and
-// stdout is a terminal, and a single-line reporter otherwise.
-func newRenderer(name string, chart bool) renderer {
-	if chart && isTerminal(os.Stdout) {
-		return &chartRenderer{name: name, useColor: os.Getenv("NO_COLOR") == "", output: os.Stdout}
+// newRenderer chooses how a stage reports progress:
+//   - JSON output: nothing (the caller prints JSON at the end);
+//   - not a terminal (piped/redirected): no live output, just a final line;
+//   - a terminal with charting: a live colored bar chart;
+//   - a terminal without charting: a single rewritten progress line.
+func newRenderer(name string, config Config) renderer {
+	switch {
+	case config.JSONOutput:
+		return silentRenderer{}
+	case !stdoutIsTerminal():
+		return &plainRenderer{name: name, output: os.Stdout}
+	case config.Chart:
+		return &chartRenderer{
+			name:     name,
+			useColor: os.Getenv("NO_COLOR") == "",
+			output:   os.Stdout,
+			width:    chartBars(os.Stdout),
+		}
+	default:
+		return &lineRenderer{name: name, output: os.Stdout}
 	}
-	return &lineRenderer{name: name}
 }
 
-// lineRenderer prints one rewritten line with the current throughput.
+// stdoutIsTerminal reports whether stdout is an interactive terminal, where
+// ANSI cursor control and line rewriting are safe.
+func stdoutIsTerminal() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// summaryLine formats the final one-line result shared by every renderer.
+func summaryLine(result Result) string {
+	return fmt.Sprintf("%-10s %8.2f Mbps   (%s in %.1fs)",
+		result.Name+":", result.MegabitsPerSecond, humanBytes(result.Bytes), result.Elapsed.Seconds())
+}
+
+// lineRenderer rewrites a single line with the current throughput; used on a
+// terminal when charting is disabled.
 type lineRenderer struct {
-	name string
+	name   string
+	output io.Writer
 }
 
 func (self *lineRenderer) sample(megabitsPerSecond float64) {
-	fmt.Printf("\r%-10s %8.2f Mbps   ", self.name+":", megabitsPerSecond)
+	_, _ = fmt.Fprintf(self.output, "\r\033[K%-10s %8.2f Mbps", self.name+":", megabitsPerSecond)
 }
+
+func (self *lineRenderer) finish(result Result) {
+	_, _ = fmt.Fprintf(self.output, "\r\033[K%s\n", summaryLine(result))
+}
+
+// plainRenderer prints nothing while running and only the final line; used when
+// stdout is not a terminal, so piped output is not littered with rewrites.
+type plainRenderer struct {
+	name   string
+	output io.Writer
+}
+
+func (self *plainRenderer) sample(float64) {}
+
+func (self *plainRenderer) finish(result Result) {
+	_, _ = fmt.Fprintf(self.output, "%s\n", summaryLine(result))
+}
+
+// silentRenderer prints nothing at all; used for JSON output.
+type silentRenderer struct{}
+
+func (self silentRenderer) sample(float64) {}
+
+func (self silentRenderer) finish(Result) {}
 
 // chartRenderer draws a scrolling colored bar chart in place, one bar per
 // sample, auto-scaling the vertical axis to the peak seen so far. The first
@@ -59,6 +117,7 @@ type chartRenderer struct {
 	name     string
 	useColor bool
 	output   io.Writer
+	width    int // maximum number of bars kept on screen, sized to the terminal
 	received int
 	samples  []float64
 	drawn    bool
@@ -72,10 +131,16 @@ func (self *chartRenderer) sample(megabitsPerSecond float64) {
 		return
 	}
 	self.samples = append(self.samples, megabitsPerSecond)
-	if len(self.samples) > chartWidth {
-		self.samples = self.samples[len(self.samples)-chartWidth:]
+	if len(self.samples) > self.width {
+		self.samples = self.samples[len(self.samples)-self.width:]
 	}
 	self.render()
+}
+
+// finish clears the line the cursor is on (below the chart, or the warming-up
+// placeholder for a stage shorter than the warmup) and prints the summary.
+func (self *chartRenderer) finish(result Result) {
+	_, _ = fmt.Fprintf(self.output, "\r\033[K%s\n", summaryLine(result))
 }
 
 func (self *chartRenderer) render() {
@@ -98,8 +163,10 @@ func (self *chartRenderer) render() {
 	}
 	self.drawn = true
 
-	// Header: stage name, current reading, and the running peak.
-	fmt.Fprintf(&builder, "\r\033[K%-10s %8.2f Mbps   peak %.2f Mbps\n", self.name, current, peak)
+	// Header: stage name, current reading, and the running peak. Truncate it to
+	// the row width so it cannot wrap on a narrow terminal and desync the redraw.
+	header := fmt.Sprintf("%-10s %8.2f Mbps   peak %.2f Mbps", self.name, current, peak)
+	fmt.Fprintf(&builder, "\r\033[K%s\n", truncateColumns(header, chartGutter+self.width))
 
 	// Bar rows, from the top row down to the bottom.
 	for row := chartHeight - 1; row >= 0; row-- {
@@ -167,12 +234,37 @@ func interpolate(from, to int, fraction float64) int {
 	return from + int(float64(to-from)*fraction)
 }
 
-// isTerminal reports whether the file is a character device (a terminal),
-// meaning ANSI cursor control is safe to use.
-func isTerminal(file *os.File) bool {
-	info, err := file.Stat()
+// chartBars returns how many bar columns fit in the terminal attached to file,
+// leaving room for the axis gutter and a one-column right margin so a full row
+// cannot wrap and corrupt the in-place redraw.
+func chartBars(file *os.File) int {
+	columns, _, err := term.GetSize(int(file.Fd()))
 	if err != nil {
-		return false
+		columns = 0
 	}
-	return info.Mode()&os.ModeCharDevice != 0
+	return barsForColumns(columns)
+}
+
+// truncateColumns shortens text to at most maxColumns display columns (treating
+// each rune as one column, which holds for the ASCII header).
+func truncateColumns(text string, maxColumns int) string {
+	runes := []rune(text)
+	if len(runes) <= maxColumns {
+		return text
+	}
+	return string(runes[:maxColumns])
+}
+
+// barsForColumns turns a terminal column count into a bar count, applying the
+// gutter, a right margin, and a floor for very narrow terminals. A non-positive
+// column count (unknown size) falls back to an assumed width.
+func barsForColumns(columns int) int {
+	if columns <= 0 {
+		columns = defaultTerminalWidth
+	}
+	bars := columns - chartGutter - 1
+	if bars < minChartWidth {
+		bars = minChartWidth
+	}
+	return bars
 }

@@ -70,12 +70,31 @@ Download     590.87 Mbps   peak 853.02 Mbps
 Download:    635.04 Mbps   (455.55 MiB in 6.0s)
 ```
 
-Pass `--chart=false` (or pipe the output to a file) for plain single-line
-progress instead:
+The chart sizes itself to the terminal width. When the output is piped or
+redirected (not a terminal), the tool skips the live chart and progress
+rewriting entirely and prints just the header and final per-stage summary:
 
 ```
 Download:    671.64 Mbps   (640.83 MiB in 10.0s)
 Upload:       65.30 Mbps   (62.28 MiB in 10.0s)
+```
+
+Pass `--chart=false` for the same plain output on a terminal.
+
+Use `--json` for machine-readable results only (no header or live progress):
+
+```sh
+10000speedtest --json --duration 5s
+```
+
+```json
+{
+  "server": "https://gz.10000gd.tech:12348",
+  "connections": 8,
+  "durationSeconds": 5,
+  "download": { "mbps": 672.93, "bytes": 422739968, "seconds": 5.03 },
+  "upload": { "mbps": 68.50, "bytes": 42827776, "seconds": 5.00 }
+}
 ```
 
 ## Flags
@@ -90,6 +109,7 @@ Upload:       65.30 Mbps   (62.28 MiB in 10.0s)
 | `--upload-size`   | `20`                             | MiB posted per upload connection                   |
 | `--insecure`      | `true`                           | skip TLS certificate verification                  |
 | `--chart`         | `true`                           | live colored bar chart (auto-off when not a TTY)   |
+| `--json`          | `false`                          | print only the final results as JSON               |
 | `--log-level`     | `info`                           | log level (`debug`, `info`, `notice`, …)           |
 
 Set `NO_COLOR` in the environment to draw the chart without ANSI colors.
