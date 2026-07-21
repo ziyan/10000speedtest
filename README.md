@@ -4,8 +4,13 @@ A command-line download/upload speed test for the China Telecom Guangdong
 network. It reproduces, on the terminal, the test that the web page at
 [`https://10000.gd.cn/#/speed`](https://10000.gd.cn/#/speed) runs in the browser.
 
+广东电信网络的命令行上传/下载测速工具。它在终端中复现了网页
+[`https://10000.gd.cn/#/speed`](https://10000.gd.cn/#/speed) 在浏览器里运行的测速。
+
 > The test servers (`gz.10000gd.tech`) are only reachable from within the China
 > Telecom Guangdong network, so the tool must be run from a host on that network.
+>
+> 测速服务器（`gz.10000gd.tech`）仅可从广东电信网络内部访问，因此本工具必须在该网络内的主机上运行。
 
 ![Live download and upload bar charts in the terminal](docs/chart.png)
 
