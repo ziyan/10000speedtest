@@ -85,9 +85,20 @@ rate.
 # Download only, 16 connections, 15 seconds
 10000speedtest --mode download --connections 16 --duration 15s
 
-# Point at a different regional server
+# Use the encrypted (HTTPS) server via its alias, or a full URL
+10000speedtest --server gz-https
 10000speedtest --server https://gz.10000gd.tech:12348
 ```
+
+`--server` accepts a full base URL or a short alias for a well-known server:
+
+| Alias      | URL                             |                                   |
+| ---------- | ------------------------------- | --------------------------------- |
+| `gz-http`  | `http://gz.10000gd.tech:12347`  | plain HTTP (**default**)          |
+| `gz-https` | `https://gz.10000gd.tech:12348` | HTTPS (TLS 1.2, AES-GCM)          |
+
+The default is **plain HTTP** so hardware without AES acceleration is not
+crypto-bound — see [Plain HTTP](#plain-http-avoiding-tls-overhead).
 
 On a terminal, each stage draws a live, colored bar chart of throughput over
 time (bars shaded red → yellow → green by height), then prints the average. The
@@ -137,32 +148,35 @@ Use `--json` for machine-readable results only (no header or live progress):
 
 ## Plain HTTP (avoiding TLS overhead)
 
-The regional server also runs an **unencrypted mirror** on port `12347` (next to
-the HTTPS server on `12348`), serving the same `/shmfile/<N>` and `/upload`
-endpoints. Point `--server` at it to skip TLS entirely:
-
-```sh
-10000speedtest --server http://gz.10000gd.tech:12347
-```
+By **default** the tool uses the server's **unencrypted mirror** on port `12347`
+(the `gz-http` alias), which serves the same `/shmfile/<N>` and `/upload`
+endpoints as the HTTPS server on `12348` but skips TLS.
 
 This matters on hardware **without AES acceleration**. The HTTPS endpoint only
 negotiates AES-GCM (it rejects ChaCha20 and TLS 1.3), so a CPU that does AES in
 software — for example a 32-bit ARM (`armv7l`) access point — becomes
 crypto-bound and caps far below the link speed (e.g. ~200 Mbps while `iperf3`
 shows multi-gigabit). Plain HTTP removes the encryption, so you measure the
-network instead of the CPU. On x86-64 and ARM64, which have hardware AES, the
-default HTTPS endpoint already runs at line rate, so this is unnecessary.
+network instead of the CPU. Defaulting to it means the tool is not
+crypto-bound anywhere out of the box.
 
-The traffic is unencrypted, which is fine for a throughput test. Note that some
-gateways with deep-packet-inspection / IPS may filter plaintext HTTP on
-non-standard ports; if `12347` times out from a device but `12348` works, check
-the firewall on its path.
+To use the encrypted endpoint instead (e.g. to test through a proxy that only
+allows HTTPS), pass `--server gz-https`:
+
+```sh
+10000speedtest --server gz-https
+```
+
+The default traffic is unencrypted, which is fine for a throughput test. Note
+that some gateways with deep-packet-inspection / IPS may filter plaintext HTTP
+on non-standard ports; if the default `12347` times out from a device but
+`gz-https` works, check the firewall on its path.
 
 ## Flags
 
 | Flag              | Default                          | Description                                        |
 | ----------------- | -------------------------------- | -------------------------------------------------- |
-| `--server`        | `https://gz.10000gd.tech:12348`  | base URL of the speed-test server                  |
+| `--server`        | `gz-http`                        | base URL or alias (`gz-http`, `gz-https`)          |
 | `--mode`          | `both`                           | which test to run: `download`, `upload`, or `both` |
 | `--connections`   | `8`                              | number of parallel connections                     |
 | `--duration`      | `10s`                            | duration of each test stage                        |

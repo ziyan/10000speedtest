@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/urfave/cli/v3"
@@ -9,8 +10,8 @@ import (
 var flags = []cli.Flag{
 	&cli.StringFlag{
 		Name:  "server",
-		Value: "https://gz.10000gd.tech:12348",
-		Usage: "base URL of the speed-test server",
+		Value: defaultServer,
+		Usage: fmt.Sprintf("base URL of the speed-test server, or a known alias (%s)", serverAliasHelp()),
 	},
 	&cli.StringFlag{
 		Name:  "mode",
