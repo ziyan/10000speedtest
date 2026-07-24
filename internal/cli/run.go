@@ -15,7 +15,7 @@ import (
 // runs the requested stages, and prints results as text or JSON.
 func run(ctx context.Context, command *cli.Command) error {
 	config := speedtest.Config{
-		Server:       command.String("server"),
+		Server:       resolveServer(command.String("server")),
 		Connections:  command.Int("connections"),
 		Duration:     command.Duration("duration"),
 		DownloadSize: command.Int("download-size"),

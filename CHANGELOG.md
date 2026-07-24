@@ -4,6 +4,13 @@ All notable changes to 10000speedtest will be documented in this file.
 
 The format is based loosely on Keep a Changelog, and versions are recorded using repository tags.
 
+## [0.6.0]
+
+### Changed
+
+- `--server` now defaults to the **plain-HTTP** endpoint (`gz-http`) instead of HTTPS, so hardware without AES acceleration is not crypto-bound out of the box. Pass `--server gz-https` for the encrypted endpoint.
+- `--server` accepts short aliases for well-known servers (`gz-http`, `gz-https`) in addition to a full base URL.
+
 ## [0.5.0]
 
 ### Added
