@@ -9,6 +9,7 @@ The format is based loosely on Keep a Changelog, and versions are recorded using
 ### Added
 
 - Releases now include a `linux_arm` (32-bit ARMv7) binary, for UniFi access points and similar `armv7l` devices.
+- `install.sh` — a `curl … | sh` installer that detects the OS/CPU, downloads the matching latest-release binary, verifies its checksum, and installs it (`INSTALL_DIR` and `VERSION` overridable).
 
 ### Changed
 

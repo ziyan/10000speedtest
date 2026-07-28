@@ -38,24 +38,26 @@ handshake succeeds. The same server also exposes an **unencrypted** mirror — s
 
 ### Quick install (prebuilt binary)
 
-On Linux or macOS, this downloads the latest release for your OS and CPU into the
-current directory:
+On Linux or macOS, install the latest release for your OS and CPU with one
+command — it detects the platform, downloads the matching binary, verifies its
+checksum, and installs it to `/usr/local/bin`:
 
 ```sh
-os=$(uname -s | tr '[:upper:]' '[:lower:]')
-case "$(uname -m)" in
-  x86_64)        arch=amd64 ;;
-  aarch64|arm64) arch=arm64 ;;
-  armv7l|armv7)  arch=arm ;;
-  *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
-esac
-url=$(curl -fsSL https://api.github.com/repos/ziyan/10000speedtest/releases/latest \
-  | grep -o "https://[^\"]*_${os}_${arch}\.tar\.gz" | head -1)
-curl -fsSL "$url" | tar -xzf - 10000speedtest
-./10000speedtest --version
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | sh
 ```
 
-Move it onto your `PATH` if you like: `sudo install 10000speedtest /usr/local/bin/`.
+The installer honors a couple of environment variables:
+
+```sh
+# install somewhere else (e.g. no root, or a UniFi device with a read-only /usr)
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | INSTALL_DIR=/tmp sh
+
+# pin a specific release
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | VERSION=v0.6.0 sh
+```
+
+If it can't write to the target directory and `sudo` isn't available, it drops
+the binary in the current directory instead.
 
 Prefer to pick a file by hand? Grab it from the
 [releases](https://github.com/ziyan/10000speedtest/releases) page. Windows ships
@@ -63,23 +65,28 @@ as a `.zip`; every release also has a `SHA256SUMS` to verify against.
 
 ### UniFi devices (gateways and access points)
 
-The tool is a single static binary, so it runs on stock UniFi firmware — copy a
-release binary over with `scp`/`rsync` and run it. Check a device's architecture
-first with `uname -m`:
+The tool is a single static binary, so it runs on stock UniFi firmware. Check a
+device's architecture first with `uname -m`:
 
 | Device                                        | `uname -m` | Release asset          |
 | --------------------------------------------- | ---------- | ---------------------- |
 | **Gateway** (e.g. IPQ9574 / Dream Machine)    | `aarch64`  | `..._linux_arm64.tar.gz` |
 | **Access point** (e.g. U6 / U7 series)        | `armv7l`   | `..._linux_arm.tar.gz`   |
 
-For example, from a machine that can reach both GitHub and the device:
+If the device can reach GitHub, run the installer on it directly — UniFi's `/usr`
+is read-only, so install to a writable path like `/tmp`:
 
 ```sh
-# download the AP (armv7) binary, then push it to the AP
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | INSTALL_DIR=/tmp sh
+```
+
+Otherwise download on another machine and copy it over:
+
+```sh
 url=$(curl -fsSL https://api.github.com/repos/ziyan/10000speedtest/releases/latest \
-  | grep -o 'https://[^"]*_linux_arm\.tar\.gz' | head -1)
+  | grep -o 'https://[^"]*_linux_arm\.tar\.gz' | head -1)   # arm64 for the gateway
 curl -fsSL "$url" | tar -xzf - 10000speedtest
-scp 10000speedtest <ssh-user>@<ap-ip>:/tmp/
+scp 10000speedtest <ssh-user>@<device-ip>:/tmp/
 ```
 
 Two things to expect on an **access point**: it has no hardware AES, so the
