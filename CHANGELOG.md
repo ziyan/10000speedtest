@@ -6,6 +6,11 @@ The format is based loosely on Keep a Changelog, and versions are recorded using
 
 ## [0.6.0]
 
+### Added
+
+- Releases now include a `linux_arm` (32-bit ARMv7) binary, for UniFi access points and similar `armv7l` devices.
+- `install.sh` — a `curl … | sh` installer that detects the OS/CPU, downloads the matching latest-release binary, verifies its checksum, and installs it (`INSTALL_DIR` and `VERSION` overridable).
+
 ### Changed
 
 - `--server` now defaults to the **plain-HTTP** endpoint (`gz-http`) instead of HTTPS, so hardware without AES acceleration is not crypto-bound out of the box. Pass `--server gz-https` for the encrypted endpoint.

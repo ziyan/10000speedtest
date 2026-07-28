@@ -26,6 +26,11 @@ jobs:
             goarch: arm64
             extension: ""
             archive: tar.gz
+          - goos: linux
+            goarch: arm
+            goarm: "7"
+            extension: ""
+            archive: tar.gz
           - goos: darwin
             goarch: amd64
             extension: ""
@@ -55,6 +60,7 @@ jobs:
           CGO_ENABLED: 0
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm }}
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           COMMIT="${GITHUB_SHA}"

@@ -36,45 +36,72 @@ handshake succeeds. The same server also exposes an **unencrypted** mirror — s
 
 ## Install
 
+### Quick install (prebuilt binary)
+
+On Linux or macOS, install the latest release for your OS and CPU with one
+command — it detects the platform, downloads the matching binary, verifies its
+checksum, and installs it to `/usr/local/bin`:
+
 ```sh
-go install github.com/ziyan/10000speedtest@latest
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | sh
 ```
 
-Or download a prebuilt binary from the [releases](https://github.com/ziyan/10000speedtest/releases) page, or build from source:
+The installer honors a couple of environment variables:
 
 ```sh
-make build
+# install somewhere else (e.g. no root, or a UniFi device with a read-only /usr)
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | INSTALL_DIR=/tmp sh
+
+# pin a specific release
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | VERSION=v0.6.0 sh
 ```
 
-### UniFi devices (ARM)
+If it can't write to the target directory and `sudo` isn't available, it drops
+the binary in the current directory instead.
 
-The tool is a static binary (`CGO_ENABLED=0`), so it runs on stock UniFi
-firmware — copy it over with `scp`/`rsync` and run it.
+Prefer to pick a file by hand? Grab it from the
+[releases](https://github.com/ziyan/10000speedtest/releases) page. Windows ships
+as a `.zip`; every release also has a `SHA256SUMS` to verify against.
 
-- **UniFi gateway** (ARM64 — e.g. the IPQ9574 / Dream Machine class): use the
-  `linux_arm64` release asset, or cross-compile:
+### UniFi devices (gateways and access points)
 
-  ```sh
-  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags '-s -w' -o 10000speedtest .
-  ```
+The tool is a single static binary, so it runs on stock UniFi firmware. Check a
+device's architecture first with `uname -m`:
 
-- **UniFi access points** (32-bit ARM, `armv7l` — e.g. U6/U7 series): these are
-  not covered by the releases, so build one:
+| Device                                        | `uname -m` | Release asset          |
+| --------------------------------------------- | ---------- | ---------------------- |
+| **Gateway** (e.g. IPQ9574 / Dream Machine)    | `aarch64`  | `..._linux_arm64.tar.gz` |
+| **Access point** (e.g. U6 / U7 series)        | `armv7l`   | `..._linux_arm.tar.gz`   |
 
-  ```sh
-  CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags '-s -w' -o 10000speedtest .
-  ```
+If the device can reach GitHub, run the installer on it directly — UniFi's `/usr`
+is read-only, so install to a writable path like `/tmp`:
 
-Check a device's architecture with `uname -m` (`aarch64` → `arm64`, `armv7l` →
-`arm`/`GOARM=7`).
+```sh
+curl -fsSL https://raw.githubusercontent.com/ziyan/10000speedtest/main/install.sh | INSTALL_DIR=/tmp sh
+```
 
-Two things to expect on an **access point**: it has no hardware AES, so use the
-[plain HTTP](#plain-http-avoiding-tls-overhead) endpoint or the HTTPS test will
-be CPU-bound (~200 Mbps); and running the test *on* the AP measures the AP's own
-CPU, not the throughput of clients forwarded through it (that path uses hardware
-offload). Use the AP's built-in `iperf`/`iperf3`, or a real client, to measure
-its actual link. The gateway (ARM64, hardware AES) runs the HTTPS test at line
-rate.
+Otherwise download on another machine and copy it over:
+
+```sh
+url=$(curl -fsSL https://api.github.com/repos/ziyan/10000speedtest/releases/latest \
+  | grep -o 'https://[^"]*_linux_arm\.tar\.gz' | head -1)   # arm64 for the gateway
+curl -fsSL "$url" | tar -xzf - 10000speedtest
+scp 10000speedtest <ssh-user>@<device-ip>:/tmp/
+```
+
+Two things to expect on an **access point**: it has no hardware AES, so the
+default [plain HTTP](#plain-http-avoiding-tls-overhead) endpoint is important —
+the HTTPS test would be CPU-bound (~200 Mbps). And running the test *on* the AP
+measures the AP's own CPU, not the throughput of clients forwarded through it
+(that path uses hardware offload); use the AP's built-in `iperf`/`iperf3`, or a
+real client, to measure its actual link. The gateway (ARM64, hardware AES) runs
+even the HTTPS test at line rate.
+
+### From source
+
+```sh
+go install github.com/ziyan/10000speedtest@latest   # or: make build
+```
 
 ## Usage
 
