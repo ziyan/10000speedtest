@@ -36,45 +36,65 @@ handshake succeeds. The same server also exposes an **unencrypted** mirror — s
 
 ## Install
 
+### Quick install (prebuilt binary)
+
+On Linux or macOS, this downloads the latest release for your OS and CPU into the
+current directory:
+
 ```sh
-go install github.com/ziyan/10000speedtest@latest
+os=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$(uname -m)" in
+  x86_64)        arch=amd64 ;;
+  aarch64|arm64) arch=arm64 ;;
+  armv7l|armv7)  arch=arm ;;
+  *) echo "unsupported arch: $(uname -m)"; exit 1 ;;
+esac
+url=$(curl -fsSL https://api.github.com/repos/ziyan/10000speedtest/releases/latest \
+  | grep -o "https://[^\"]*_${os}_${arch}\.tar\.gz" | head -1)
+curl -fsSL "$url" | tar -xzf - 10000speedtest
+./10000speedtest --version
 ```
 
-Or download a prebuilt binary from the [releases](https://github.com/ziyan/10000speedtest/releases) page, or build from source:
+Move it onto your `PATH` if you like: `sudo install 10000speedtest /usr/local/bin/`.
+
+Prefer to pick a file by hand? Grab it from the
+[releases](https://github.com/ziyan/10000speedtest/releases) page. Windows ships
+as a `.zip`; every release also has a `SHA256SUMS` to verify against.
+
+### UniFi devices (gateways and access points)
+
+The tool is a single static binary, so it runs on stock UniFi firmware — copy a
+release binary over with `scp`/`rsync` and run it. Check a device's architecture
+first with `uname -m`:
+
+| Device                                        | `uname -m` | Release asset          |
+| --------------------------------------------- | ---------- | ---------------------- |
+| **Gateway** (e.g. IPQ9574 / Dream Machine)    | `aarch64`  | `..._linux_arm64.tar.gz` |
+| **Access point** (e.g. U6 / U7 series)        | `armv7l`   | `..._linux_arm.tar.gz`   |
+
+For example, from a machine that can reach both GitHub and the device:
 
 ```sh
-make build
+# download the AP (armv7) binary, then push it to the AP
+url=$(curl -fsSL https://api.github.com/repos/ziyan/10000speedtest/releases/latest \
+  | grep -o 'https://[^"]*_linux_arm\.tar\.gz' | head -1)
+curl -fsSL "$url" | tar -xzf - 10000speedtest
+scp 10000speedtest <ssh-user>@<ap-ip>:/tmp/
 ```
 
-### UniFi devices (ARM)
+Two things to expect on an **access point**: it has no hardware AES, so the
+default [plain HTTP](#plain-http-avoiding-tls-overhead) endpoint is important —
+the HTTPS test would be CPU-bound (~200 Mbps). And running the test *on* the AP
+measures the AP's own CPU, not the throughput of clients forwarded through it
+(that path uses hardware offload); use the AP's built-in `iperf`/`iperf3`, or a
+real client, to measure its actual link. The gateway (ARM64, hardware AES) runs
+even the HTTPS test at line rate.
 
-The tool is a static binary (`CGO_ENABLED=0`), so it runs on stock UniFi
-firmware — copy it over with `scp`/`rsync` and run it.
+### From source
 
-- **UniFi gateway** (ARM64 — e.g. the IPQ9574 / Dream Machine class): use the
-  `linux_arm64` release asset, or cross-compile:
-
-  ```sh
-  CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags '-s -w' -o 10000speedtest .
-  ```
-
-- **UniFi access points** (32-bit ARM, `armv7l` — e.g. U6/U7 series): these are
-  not covered by the releases, so build one:
-
-  ```sh
-  CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags '-s -w' -o 10000speedtest .
-  ```
-
-Check a device's architecture with `uname -m` (`aarch64` → `arm64`, `armv7l` →
-`arm`/`GOARM=7`).
-
-Two things to expect on an **access point**: it has no hardware AES, so use the
-[plain HTTP](#plain-http-avoiding-tls-overhead) endpoint or the HTTPS test will
-be CPU-bound (~200 Mbps); and running the test *on* the AP measures the AP's own
-CPU, not the throughput of clients forwarded through it (that path uses hardware
-offload). Use the AP's built-in `iperf`/`iperf3`, or a real client, to measure
-its actual link. The gateway (ARM64, hardware AES) runs the HTTPS test at line
-rate.
+```sh
+go install github.com/ziyan/10000speedtest@latest   # or: make build
+```
 
 ## Usage
 
